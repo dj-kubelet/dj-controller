@@ -1,0 +1,8 @@
+apiVersion: dj-kubelet.com/v1
+kind: Track
+
+metadata:
+  name: track2
+
+spec:
+  uri: spotify:track:6Ix6mJmtH7M8L7du08mkEi

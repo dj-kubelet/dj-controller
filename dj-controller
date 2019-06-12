@@ -1,0 +1,143 @@
+#!/bin/bash
+set -euo pipefail
+set -x
+
+ACCESS_TOKEN=$(kubectl get secrets spotify-oauth -ojsonpath='{.data.accesstoken}' | base64 --decode)
+
+normalize_str() {
+    S=${1// /-}                                 # remove spaces from $1
+    S=${S//:/-}                                 # replace : with -
+    S=$(echo "$S" | tr "[:upper:]" "[:lower:]") # lowercase
+    S=$(echo "$S" | LANG=c tr -cd '[:print:]')  # remove non ascii characters
+    S=$(echo "$S" | cut -c-253)                 # trim to max 253 characters
+    echo "$S"
+}
+
+ms_to_min_sec() {
+    ms=$1
+    ((full_minutes = ms / 60000))
+    # Remaining after full minutes is removed
+    ((remaining_ms = ms % 60000))
+    ((full_secs = remaining_ms / 1000))
+    # Remaining after full minutes and full seconds is removed
+    ((remaining_ms2 = remaining_ms % 1000))
+
+    # TODO: Figure out how the spotify apps do rounding.
+    if (("$remaining_ms2" > 500)); then
+        extra_sec=1
+    else
+        extra_sec=0
+    fi
+    echo "$full_minutes:$((full_secs + extra_sec))"
+}
+
+sp_curl() {
+    curl -s -H "Authorization: Bearer $ACCESS_TOKEN" "$@"
+}
+
+get_track() {
+    track="${1/spotify:track:/}"
+    sp_curl "https://api.spotify.com/v1/tracks/$track"
+}
+
+find_pod() {
+    track=$1
+    kubectl get pods -ojson |
+        jq -r ".items[] | select(.metadata.ownerReferences[].name == \"$track\")"
+}
+
+find_pod_name() {
+    track=$1
+    find_pod "$track" | jq -r ".metadata.name"
+}
+
+manage() {
+    export TRACK_NAME=$1
+    echo 1>&2 "Create pod for new track: $TRACK_NAME"
+    local track
+    track="$(kubectl get tr "$TRACK_NAME" -ojson)"
+
+    declare -xg TRACK_UID
+    TRACK_UID="$(jq -r '.metadata.uid' <<<"$track")"
+
+    declare -x TRACK_URI
+    TRACK_URI="$(jq -r '.spec.uri' <<<"$track")"
+
+    declare -x POD_NAME
+    POD_NAME="${TRACK_NAME}-$(normalize_str "$TRACK_URI")"
+
+    envsubst <"./pod.tmpl.yaml" |
+        kubectl create -f ./pod.yaml || true
+}
+
+update_track_info() {
+    track_name=$1
+    echo 1>&2 "Update track info: $track_name"
+
+    track_uri="$(kubectl get tr "$track_name" -ojsonpath='{.spec.uri}')"
+    track=$(get_track "$track_uri")
+
+    t_name=$(jq -r '.name' <<<"$track")
+    album=$(jq -r '.album.name' <<<"$track")
+
+    # Get duration string as minutes:seconds
+    duration=$(jq -r '.duration_ms' <<<"$track")
+    duration=$(ms_to_min_sec "$duration")
+
+    artist_name=$(jq -r '.artists[0].name' <<<"$track")
+    patch="$(
+        cat <<EOF
+{ "status": {
+        "track": {
+            "album": "$album",
+            "artist": "$artist_name",
+            "duration": "$duration",
+            "name": "$t_name"
+        }
+    }
+}
+EOF
+    )"
+    kubectl patch track "$track_name" --type merge --patch "$patch"
+}
+
+update_track_progress() {
+    track_name=$1
+    echo 1>&2 "Update track progress: $track_name"
+    pod=$(find_pod "$track_name")
+    pod_phase=$(jq -r '.status.phase' <<<"$pod")
+
+    patch="$(
+        cat <<EOF
+{ "status": {
+        "phase": "$pod_phase",
+        "progress": {
+            "bar": ".....|.....",
+            "string": "1:02",
+            "ratio": "0.10",
+            "ratioString": "0:10 / 5:31"
+        }
+    }
+}
+EOF
+    )"
+    kubectl patch track "$track_name" --type merge --patch "$patch"
+
+}
+
+control() {
+    for track in $(kubectl get tr -ojsonpath='{.items[*].metadata.name}'); do
+        if [[ $(find_pod_name "$track") == "" ]]; then
+            manage "$track"
+            update_track_info "$track"
+        else
+            update_track_progress "$track"
+        fi
+    done
+}
+
+control
+while [[ "$1" == "--forever" ]]; do
+    sleep 5
+    control
+done

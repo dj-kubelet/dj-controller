@@ -1,0 +1,22 @@
+apiVersion: dj-kubelet.com/v1
+kind: Track
+
+metadata:
+  name: track1
+
+spec:
+  uri: spotify:track:5sICkBXVmaCQk5aISGR3x1
+
+status:
+  phase: Playing
+  progress:
+    bar: "....|.............."
+    string: "1:02"
+    ratio: "0.10"
+    ratioString: "0:10 / 5:31"
+
+  track:
+    name: Enter Sandman
+    artist: Metallica
+    album: Metallica
+    duration: "5:31"
