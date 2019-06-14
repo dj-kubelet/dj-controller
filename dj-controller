@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Development only
 #set -x
-#ACCESS_TOKEN=$(kubectl get secrets spotify-oauth -ojsonpath='{.data.accesstoken}' | base64 --decode)
+ACCESS_TOKEN=$(kubectl get secrets spotify-oauth -ojsonpath='{.data.accesstoken}' | base64 --decode)
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
@@ -85,7 +85,7 @@ manage() {
     declare -x POD_NAME
     POD_NAME="${TRACK_NAME}-${normalized_track_uri}-"
 
-    envsubst <"$DIR/pod.tmpl.yaml" |
+    envsubst <"$DIR/template/pod.tmpl.yaml" |
         kubectl create -f - || true
 }
 
@@ -100,8 +100,8 @@ update_track_info() {
     album=$(jq -r '.album.name' <<<"$track")
 
     # Get duration as minutes:seconds
-    duration=$(jq -r '.duration_ms' <<<"$track")
-    duration=$(ms_to_min_sec "$duration")
+    duration_ms=$(jq -r '.duration_ms' <<<"$track")
+    duration=$(ms_to_min_sec "$duration_ms")
 
     artist_name=$(jq -r '.artists[0].name' <<<"$track")
     patch="$(
@@ -111,6 +111,7 @@ update_track_info() {
             "album": "$album",
             "artist": "$artist_name",
             "duration": "$duration",
+            "duration_ms": "$duration_ms",
             "name": "$t_name"
         }
     }
@@ -138,13 +139,16 @@ update_track_progress() {
     echo 1>&2 "Update track progress: $track_name"
     pod=$(find_pod "$track_name")
 
-    # TODO get from status.track.duration
+    # TODO get from status.track.duration_ms
     duration_ms="0"
     progress_ms="0"
 
     pod_phase=$(jq -r '.status.phase' <<<"$pod")
     if [[ "$pod_phase" == "Succeeded" ]]; then
         phase="Done"
+        progress_ms="$duration_ms"
+    elif [[ "$pod_phase" == "Pending" ]]; then
+        phase="Queued"
     elif [[ "$pod_phase" == "Running" ]]; then
         phase="Playing"
         np=$(now_playing)
@@ -162,6 +166,9 @@ update_track_progress() {
     duration_string=$(ms_to_min_sec "$duration_ms")
     progress_string=$(ms_to_min_sec "$progress_ms")
     ratio=$(jq -n "$progress_ms/$duration_ms")
+    if [ "$ratio" == "null" ] ; then
+      ratio="0"
+    fi
     pb=$(progress_bar 20 "$ratio")
 
     patch="$(
