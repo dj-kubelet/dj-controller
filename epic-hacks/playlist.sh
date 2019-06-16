@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-ACCESS_TOKEN=$(kubectl get secrets spotify-oauth -ojsonpath='{.data.accesstoken}' | base64 --decode)
+NAMESPACE=spotify-matti4s
+ACCESS_TOKEN=$(kubectl --namespace="$NAMESPACE" get secrets spotify-oauth -ojsonpath='{.data.accesstoken}' | base64 --decode)
 
 # Create a Kubernetes friendly name of the track search input
 normalize_str() {
@@ -24,5 +25,5 @@ curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
     while read -r uri; do
         name="${uri/spotify:track:/}"
         name="$(normalize_str "$name")"
-        URI="$uri" NAME="$name" envsubst <"$DIR/track.tmpl.yaml" | kubectl create -f -
+        URI="$uri" NAME="$name" envsubst <"$DIR/track.tmpl.yaml" | kubectl --namespace="$NAMESPACE" create -f -
     done

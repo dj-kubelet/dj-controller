@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: dj-controller
+  name: dj-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dj-controller
+  template:
+    metadata:
+      labels:
+        app: dj-controller
+    spec:
+      serviceAccountName: dj-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65535
+        runAsGroup: 65535
+        fsGroup: 65535
+
+      containers:
+      - image: djkubelet/dj-controller:latest
+        name: dj-controller
+        #args:
+        #- -v
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          readOnlyRootFilesystem: true
+        resources:
+          limits:
+            cpu: 250m
+            memory: 200Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+        volumeMounts:
+        - name: spotify-oauth
+          mountPath: "/etc/spotify-oauth"
+        - name: tmpfs
+          mountPath: /tmp
+
+      volumes:
+      - name: spotify-oauth
+        secret:
+          secretName: spotify-oauth
+      - name: tmpfs
+        emptyDir:
+          medium: Memory

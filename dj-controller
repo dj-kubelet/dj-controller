@@ -1,9 +1,10 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
-# Development only
-#set -x
-ACCESS_TOKEN=$(kubectl get secrets spotify-oauth -ojsonpath='{.data.accesstoken}' | base64 --decode)
+if [ "$1" == "-v" ]; then
+    set -x
+fi
+set -u
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
@@ -45,7 +46,7 @@ ms_to_min_sec() {
     else
         extra_sec=0
     fi
-    ((seconds =full_secs + extra_sec))
+    ((seconds = full_secs + extra_sec))
     echo "$full_minutes:$(printf "%02d" "$seconds")"
 }
 
@@ -60,65 +61,14 @@ now_playing() {
 
 find_pod() {
     track=$1
-    kubectl get pods -ojson |
+    kubectl --namespace="$NAMESPACE" get pods -ojson |
         jq -r ".items[] | select(.metadata.ownerReferences[].name == \"$track\")"
 }
 
 find_pod_name() {
     track=$1
-    find_pod "$track" | jq -r ".metadata.name"
-}
-
-manage() {
-    export TRACK_NAME=$1
-    echo 1>&2 "Create pod for new track: $TRACK_NAME"
-    local track
-    track="$(kubectl get tr "$TRACK_NAME" -ojson)"
-
-    declare -xg TRACK_UID
-    TRACK_UID="$(jq -r '.metadata.uid' <<<"$track")"
-
-    declare -x TRACK_URI
-    TRACK_URI="$(jq -r '.spec.uri' <<<"$track")"
-    normalized_track_uri="$(normalize_str "${TRACK_URI/spotify:track:/}")"
-
-    declare -x POD_NAME
-    POD_NAME="${TRACK_NAME}-${normalized_track_uri}-"
-
-    envsubst <"$DIR/template/pod.tmpl.yaml" |
-        kubectl create -f - || true
-}
-
-update_track_info() {
-    track_name=$1
-    echo 1>&2 "Update track info: $track_name"
-
-    track_uri="$(kubectl get tr "$track_name" -ojsonpath='{.spec.uri}')"
-    track=$(get_track "$track_uri")
-
-    t_name=$(jq -r '.name' <<<"$track")
-    album=$(jq -r '.album.name' <<<"$track")
-
-    # Get duration as minutes:seconds
-    duration_ms=$(jq -r '.duration_ms' <<<"$track")
-    duration=$(ms_to_min_sec "$duration_ms")
-
-    artist_name=$(jq -r '.artists[0].name' <<<"$track")
-    patch="$(
-        cat <<EOF
-{ "status": {
-        "track": {
-            "album": "$album",
-            "artist": "$artist_name",
-            "duration": "$duration",
-            "duration_ms": "$duration_ms",
-            "name": "$t_name"
-        }
-    }
-}
-EOF
-    )"
-    kubectl patch track "$track_name" --type merge --patch "$patch"
+    track_name="$(jq -r '.metadata.name' <<<"$track")"
+    find_pod "$track_name" | jq -r ".metadata.name"
 }
 
 print_n_x() {
@@ -134,13 +84,70 @@ progress_bar() {
     print_n_x "$(jq -n "(1 - $ratio) * $width | ceil")" .
 }
 
+manage() {
+    track=$1
+
+    declare -xg TRACK_NAME
+    TRACK_NAME="$(jq -r '.metadata.name' <<<"$track")"
+    echo 1>&2 "Create pod for new track: $TRACK_NAME"
+
+    declare -xg TRACK_UID
+    TRACK_UID="$(jq -r '.metadata.uid' <<<"$track")"
+
+    declare -x TRACK_URI
+    TRACK_URI="$(jq -r '.spec.uri' <<<"$track")"
+    normalized_track_uri="$(normalize_str "${TRACK_URI/spotify:track:/}")"
+
+    declare -x POD_NAME
+    POD_NAME="${TRACK_NAME}-${normalized_track_uri}-"
+
+    envsubst <"$DIR/template/pod.tmpl.yaml" |
+        kubectl --namespace="$NAMESPACE" create -f -
+}
+
+update_track_info() {
+    track=$1
+    track_name="$(jq -r '.metadata.name' <<<"$track")"
+    echo 1>&2 "Update track info: $track_name"
+
+    track_uri="$(jq -r '.spec.uri' <<<"$track")"
+    sp_track=$(get_track "$track_uri")
+
+    t_name=$(jq -r '.name' <<<"$sp_track")
+    album=$(jq -r '.album.name' <<<"$sp_track")
+
+    # Get duration as minutes:seconds
+    duration_ms=$(jq -r '.duration_ms' <<<"$sp_track")
+    # TODO check for null from jq
+    duration=$(ms_to_min_sec "$duration_ms")
+
+    artist_name=$(jq -r '.artists[0].name' <<<"$sp_track")
+    patch="$(
+        cat <<EOF
+{ "status": {
+        "track": {
+            "album": "$album",
+            "artist": "$artist_name",
+            "duration": "$duration",
+            "duration_ms": "$duration_ms",
+            "name": "$t_name"
+        }
+    }
+}
+EOF
+    )"
+    kubectl --namespace="$NAMESPACE" patch track "$track_name" --type merge --patch "$patch"
+}
+
 update_track_progress() {
-    track_name=$1
-    echo 1>&2 "Update track progress: $track_name"
+    track=$1
+
+    track_name="$(jq -r '.metadata.name' <<<"$track")"
+    #echo 1>&2 "Update track progress: $track_name"
+
     pod=$(find_pod "$track_name")
 
-    # TODO get from status.track.duration_ms
-    duration_ms="0"
+    duration_ms="$(jq -r '.status.track.duration_ms' <<<"$track")"
     progress_ms="0"
 
     pod_phase=$(jq -r '.status.phase' <<<"$pod")
@@ -149,6 +156,9 @@ update_track_progress() {
         progress_ms="$duration_ms"
     elif [[ "$pod_phase" == "Pending" ]]; then
         phase="Queued"
+    elif [[ "$pod_phase" == "Failed" ]]; then
+        phase="Failed"
+        # TODO: Handle failure, recreate pod or something.
     elif [[ "$pod_phase" == "Running" ]]; then
         phase="Playing"
         np=$(now_playing)
@@ -163,11 +173,17 @@ update_track_progress() {
     else
         phase="Unknown - $pod_phase"
     fi
+    if [[ "$duration_ms" == "null" ]]; then
+        duration_ms=0
+    fi
+    if [[ "$progress_ms" == "null" ]]; then
+        progress_ms=0
+    fi
     duration_string=$(ms_to_min_sec "$duration_ms")
     progress_string=$(ms_to_min_sec "$progress_ms")
     ratio=$(jq -n "$progress_ms/$duration_ms")
-    if [ "$ratio" == "null" ] ; then
-      ratio="0"
+    if [ "$ratio" == "null" ]; then
+        ratio="0"
     fi
     pb=$(progress_bar 20 "$ratio")
 
@@ -185,23 +201,34 @@ update_track_progress() {
 }
 EOF
     )"
-    kubectl patch track "$track_name" --type merge --patch "$patch"
-
+    #echo 1>&2 "$patch"
+    #echo 1>&2 "$(jq -r '{"status": {"phase":.status.phase, "progress":.status.progress}}' <<<"$track")"
+    diff="$(jq -r "$patch == {\"status\": {\"phase\":.status.phase, \"progress\":.status.progress}}" <<<"$track")"
+    if [[ "$diff" != "true" ]]; then
+        kubectl --namespace="$NAMESPACE" patch track "$track_name" --type merge --patch "$patch"
+    fi
 }
 
 control() {
-    for track in $(kubectl get tr -ojsonpath='{.items[*].metadata.name}'); do
-        if [[ $(find_pod_name "$track") == "" ]]; then
-            manage "$track"
-            update_track_info "$track"
-        else
-            # TODO Skip tracks that are done
-            update_track_progress "$track"
-        fi
-    done
+    kubectl --namespace="$NAMESPACE" get tr -ojson |
+        jq --compact-output -r '.items[]' |
+        while read -r track; do
+            phase="$(jq -r '.status.phase' <<<"$track")"
+            if [[ "$phase" == "Done" ]]; then
+                # Don't do anything with tracks that are Done
+                :
+            elif [[ $(find_pod_name "$track") == "" ]]; then
+                # A new track. Let the controller manage it.
+                manage "$track"
+                update_track_info "$track"
+            else
+                update_track_progress "$track"
+            fi
+        done
 }
 
 while true; do
     sleep 5
-    control
+    time control
+    echo "control loop ran"
 done
