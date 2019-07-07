@@ -46,11 +46,16 @@ spec:
           mountPath: "/etc/spotify-oauth"
         - name: tmpfs
           mountPath: /tmp
+        - name: kubectl-cache
+          mountPath: /.kube
 
       volumes:
       - name: spotify-oauth
         secret:
           secretName: spotify-oauth
       - name: tmpfs
+        emptyDir:
+          medium: Memory
+      - name: kubectl-cache
         emptyDir:
           medium: Memory
