@@ -24,8 +24,6 @@ spec:
       containers:
       - image: djkubelet/dj-controller:latest
         name: dj-controller
-        #args:
-        #- -v
         env:
         - name: NAMESPACE
           valueFrom:
@@ -36,8 +34,8 @@ spec:
           readOnlyRootFilesystem: true
         resources:
           limits:
-            cpu: 250m
-            memory: 200Mi
+            cpu: 2000m
+            memory: 1000Mi
           requests:
             cpu: 10m
             memory: 20Mi
