@@ -8,6 +8,10 @@ set -u
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
+n_kubectl() {
+    kubectl --namespace="$NAMESPACE" "$@"
+}
+
 auth_header() {
     set +u
     token=$ACCESS_TOKEN
@@ -61,7 +65,7 @@ now_playing() {
 
 find_pod() {
     track=$1
-    kubectl --namespace="$NAMESPACE" get pods -ojson |
+    n_kubectl get pods -ojson |
         jq -r ".items[] | select(.metadata.ownerReferences[].name == \"$track\")"
 }
 
@@ -102,7 +106,7 @@ manage() {
     POD_NAME="${TRACK_NAME}-${normalized_track_uri}-"
 
     envsubst <"$DIR/template/pod.tmpl.yaml" |
-        kubectl --namespace="$NAMESPACE" create -f -
+        n_kubectl create -f -
 }
 
 update_track_info() {
@@ -136,7 +140,7 @@ update_track_info() {
 }
 EOF
     )"
-    kubectl --namespace="$NAMESPACE" patch track "$track_name" --type merge --patch "$patch"
+    n_kubectl patch track "$track_name" --type merge --patch "$patch"
 }
 
 update_track_progress() {
@@ -205,12 +209,12 @@ EOF
     #echo 1>&2 "$(jq -r '{"status": {"phase":.status.phase, "progress":.status.progress}}' <<<"$track")"
     diff="$(jq -r "$patch == {\"status\": {\"phase\":.status.phase, \"progress\":.status.progress}}" <<<"$track")"
     if [[ "$diff" != "true" ]]; then
-        kubectl --namespace="$NAMESPACE" patch track "$track_name" --type merge --patch "$patch"
+        n_kubectl patch track "$track_name" --type merge --patch "$patch"
     fi
 }
 
 control() {
-    kubectl --namespace="$NAMESPACE" get tr -ojson |
+    n_kubectl get tr -ojson |
         jq --compact-output -r '.items[]' |
         while read -r track; do
             phase="$(jq -r '.status.phase' <<<"$track")"
