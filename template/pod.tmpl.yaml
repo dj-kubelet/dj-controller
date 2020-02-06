@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   generateName: $POD_NAME
   labels:
-    dj-kubelet/spotify-track: ""
+    dj-kubelet.com/spotify-track: ""
   ownerReferences:
   - apiVersion: dj-kubelet.com/v1
     kind: Track
@@ -32,6 +32,6 @@ spec:
       requiredDuringSchedulingIgnoredDuringExecution:
       - labelSelector:
           matchExpressions:
-          - key: dj-kubelet/spotify-track
+          - key: dj-kubelet.com/spotify-track
             operator: Exists
         topologyKey: "kubernetes.io/hostname"
