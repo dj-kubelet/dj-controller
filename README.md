@@ -5,6 +5,9 @@ dj-controller manage tracks and their pods.
 Setup template deployment and CRDs for dj-kubelet/console
 
 ```
+docker build -t dj-controller .
+kind load docker-image --name dj-kubelet dj-controller:latest
+
 kubectl create namespace dj-controller
-kubectl -n dj-controller apply -f ./k8s
+kubectl apply -k ./development
 ```

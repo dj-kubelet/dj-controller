@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: console
+spec:
+  template:
+    spec:
+      containers:
+      - name: dj-controller
+        env:
+        - name: POD_TEMPLATE
+          value: ./template/development-pod.tmpl.yaml
