@@ -59,7 +59,7 @@ search() {
     sp_curl -G "https://api.spotify.com/v1/search" \
         -d "type=track" \
         --data-urlencode "q=$*" |
-        jq -r '.tracks.items[] | {uri: .uri, name: .name, artists: ([.artists[].name] | join(", "))} | "\(.uri)\t\(.name)\t\(.artists)"'
+        jq -r '.tracks.items[] | {uri: .uri, name: .name, artists: ([.artists[].name] | join(", "))} | "\(.uri)\t\(.name)\t\t\(.artists)"'
 }
 
 queue_search() {
