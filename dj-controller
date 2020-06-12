@@ -6,7 +6,7 @@ if [ "$1" == "-v" ]; then
 fi
 set -u
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+POD_TEMPLATE="${POD_TEMPLATE:-./template/prod-pod.tmpl.yaml}"
 
 n_kubectl() {
     kubectl --namespace="$NAMESPACE" "$@"
@@ -105,7 +105,7 @@ manage() {
     declare -x POD_NAME
     POD_NAME="${TRACK_NAME}-${normalized_track_uri}-"
 
-    envsubst <"$DIR/template/pod.tmpl.yaml" |
+    envsubst <"$POD_TEMPLATE" |
         n_kubectl create -f -
 }
 
