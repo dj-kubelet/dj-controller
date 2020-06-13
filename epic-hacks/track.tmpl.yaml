@@ -1,8 +1,0 @@
-apiVersion: dj-kubelet.com/v1
-kind: Track
-
-metadata:
-  name: $NAME
-
-spec:
-  uri: $URI
