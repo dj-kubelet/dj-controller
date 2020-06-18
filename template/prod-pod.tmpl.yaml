@@ -12,6 +12,7 @@ metadata:
     controller: true
 spec:
   restartPolicy: Never
+  schedulerName: dj-scheduler
   containers:
   - image: djkubelet/spotify-ctl:latest
     name: track
@@ -26,12 +27,3 @@ spec:
   - name: spotify-oauth
     secret:
       secretName: spotify-oauth
-
-  affinity:
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-      - labelSelector:
-          matchExpressions:
-          - key: dj-kubelet.com/spotify-track
-            operator: Exists
-        topologyKey: "kubernetes.io/hostname"
